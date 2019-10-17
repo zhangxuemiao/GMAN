@@ -6,6 +6,7 @@ from helper import mix_prediction, sigmoid, get_mnist_data
 import matplotlib.pyplot as plt
 from models import generator, discriminator
 from time import time
+import sys
 
 
 class GMAN:
@@ -406,6 +407,8 @@ def main(_):
                     with tf.device('/cpu:0'):
                         mpath = saver.save(sess, path + '/model.ckpt', global_step=j)
                         print('Model saved as %s' % mpath)
+
+                    sys.stdout.flush()
 
             except KeyboardInterrupt:
                 print('interrupted run')
