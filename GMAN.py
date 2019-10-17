@@ -33,29 +33,30 @@ class GMAN:
 
         with tf.variable_scope(self.name):
             # Define latent distribution
-            self.z = tf.random_uniform(shape=[self.channel_size, 1, 1, self.num_latent],
-                                       minval=-1., maxval=1., name='z')
-            
+            self.z = tf.random_uniform(shape=[self.channel_size, 1, 1, self.num_latent], minval=-1., maxval=1.,
+                                       name='z')
+
             # Generate fake images
             self.fake = generator(self)
+            # print(f'self.fake -> {self.fake}')
             if boosting_variant is None:
                 fake_split = tf.split(axis=0, num_or_size_splits=self.N, value=self.fake, name='fake_split')
             else:
-                fake_split = [self.fake]*self.N
+                fake_split = [self.fake] * self.N
 
             # Discriminate fake images
             self.Df_logits = [discriminator(self, fake_split[ind], ind, (self.base_prob + self.delta_p * (ind + 1)),
                                             reuse=False)
                               for ind in range(self.N)]
-            
+
             # Retrieve real images
             self.real = tf.placeholder(tf.float32, shape=[self.channel_size, self.side, self.side, self.num_channels],
                                        name='real')
             if boosting_variant is None:
                 real_split = tf.split(axis=0, num_or_size_splits=self.N, value=self.real, name='real_split')
             else:
-                real_split = [self.real]*self.N
-            
+                real_split = [self.real] * self.N
+
             # Discriminate real images
             self.Dr_logits = [discriminator(self, real_split[ind], ind, (self.base_prob + self.delta_p * (ind + 1)),
                                             reuse=True)
@@ -66,7 +67,7 @@ class GMAN:
             self.G_vars = [var for var in t_vars if (self.name + '/generator') in var.name]
             self.D_vars = [[var for var in t_vars if ('%s/discriminator_%d' % (self.name, num)) in var.name]
                            for num in range(self.N)]
-            
+
             # Assign values to weights (if given)
             self.assign_weights = []
             if D_weights is not None:
@@ -105,7 +106,7 @@ class GMAN:
             self.G_optimizer = tf.train.AdamOptimizer(learning_rate=self.lrg, beta1=0.5)
             self.G_optim = self.G_optimizer.minimize(self.G_loss, var_list=self.G_vars)
             self.G_grads = self.G_optimizer.compute_gradients(self.G_loss, var_list=self.G_vars)
-            
+
             # Join all updates
             self.all_opt = [opt for opt in self.D_optim]
             self.all_opt.append(self.G_optim)
@@ -119,23 +120,23 @@ class GMAN:
         # Compute expectation of booster prediction
         _Df_logits = tf.concat(axis=1, values=self.Df_logits)
         _Dr_logits = tf.concat(axis=1, values=self.Dr_logits)
-        _Df = tf.cumsum(alpha*_Df_logits,axis=1,exclusive=False)
-        _Dr = tf.cumsum(alpha*_Dr_logits,axis=1,exclusive=False)
-        Df_weighted = v/tf.reduce_sum(v)*_Df
-        Dr_weighted = v/tf.reduce_sum(v)*_Dr
-        self.Df_expected = tf.reduce_sum(Df_weighted,axis=1)
-        self.Dr_expected = tf.reduce_sum(Dr_weighted,axis=1)
+        _Df = tf.cumsum(alpha * _Df_logits, axis=1, exclusive=False)
+        _Dr = tf.cumsum(alpha * _Dr_logits, axis=1, exclusive=False)
+        Df_weighted = v / tf.reduce_sum(v) * _Df
+        Dr_weighted = v / tf.reduce_sum(v) * _Dr
+        self.Df_expected = tf.reduce_sum(Df_weighted, axis=1)
+        self.Dr_expected = tf.reduce_sum(Dr_weighted, axis=1)
 
         # Compute auxiliary variable, s
         # Note: 'q' is 'z' from AdaBoost.OL to avoid confusion with latent variable 'z' in GAN
         qf = -_Df_logits
         qr = _Dr_logits
-        q = tf.concat(axis=0, values=[qf,qr])
-        s_0 = tf.clip_by_value(tf.cumsum(alpha*q, exclusive=True), -4., 4.)
-        s_1 = tf.clip_by_value(tf.cumsum(alpha*q, exclusive=False), -4., 4.)
+        q = tf.concat(axis=0, values=[qf, qr])
+        s_0 = tf.clip_by_value(tf.cumsum(alpha * q, exclusive=True), -4., 4.)
+        s_1 = tf.clip_by_value(tf.cumsum(alpha * q, exclusive=False), -4., 4.)
 
         # Compute loss weights
-        w = 1/(1+tf.exp(s_0))  # size: batch_size x num_discriminators
+        w = 1 / (1 + tf.exp(s_0))  # size: batch_size x num_discriminators
         wf, wr = tf.split(axis=0, num_or_size_splits=2, value=w)
         wf_split = tf.split(axis=1, num_or_size_splits=self.N, value=wf)
         wr_split = tf.split(axis=1, num_or_size_splits=self.N, value=wr)
@@ -143,17 +144,17 @@ class GMAN:
         # Define v update -- only needed if training generator with expectation of booster prediction
         wrong_f = sigmoid(Df_weighted)
         wrong_r = sigmoid(-Dr_weighted)
-        wrong = tf.concat(axis=0, values=[wrong_f,wrong_r])
-        v_new = tf.reduce_mean(v*tf.exp(wrong),axis=0)
+        wrong = tf.concat(axis=0, values=[wrong_f, wrong_r])
+        v_new = tf.reduce_mean(v * tf.exp(wrong), axis=0)
 
         # Define alpha update
-        nt = 4/tf.sqrt(t)
+        nt = 4 / tf.sqrt(t)
         alpha_delta = nt * q / (1 + tf.exp(s_1))
         alpha_new = tf.reduce_mean(tf.clip_by_value(alpha + alpha_delta, -2, 2), axis=0)
 
         # Store auxiliary variable update pairs (t,alpha,v)
         self.aux_vars = [t, alpha, v]
-        self.aux_vars_new = [t+1, alpha_new, v_new]
+        self.aux_vars_new = [t + 1, alpha_new, v_new]
 
         # logits --> probabilities
         self.Df = [sigmoid(logit) for logit in self.Df_logits]
@@ -161,20 +162,20 @@ class GMAN:
 
         # Define discriminator losses
         if obj == 'original':
-            self.D_losses = [tf.reduce_mean(-wr_split[ind]*tf.log(self.Dr[ind])
-                                            - wf_split[ind]*tf.log(1-self.Df[ind]))
-                                   for ind in range(len(self.Dr))]
+            self.D_losses = [tf.reduce_mean(-wr_split[ind] * tf.log(self.Dr[ind])
+                                            - wf_split[ind] * tf.log(1 - self.Df[ind]))
+                             for ind in range(len(self.Dr))]
         else:
-            self.D_losses = [tf.reduce_mean(-wr_split[ind]*tf.log(self.Dr[ind])
-                                            + wf_split[ind]*tf.log(self.Df[ind]))
-                                   for ind in range(len(self.Dr))]
+            self.D_losses = [tf.reduce_mean(-wr_split[ind] * tf.log(self.Dr[ind])
+                                            + wf_split[ind] * tf.log(self.Df[ind]))
+                             for ind in range(len(self.Dr))]
         for ind in range(len(self.Dr)):
             tf.summary.scalar('D_%d_Loss' % ind, self.D_losses[ind])
 
         # Define minimax objectives for discriminators
-        self.V_D = [tf.reduce_mean(tf.log(self.Dr[ind])+tf.log(1-self.Df[ind])) for ind in range(len(self.Dr))]
+        self.V_D = [tf.reduce_mean(tf.log(self.Dr[ind]) + tf.log(1 - self.Df[ind])) for ind in range(len(self.Dr))]
 
-    def get_G_boosted_loss(self, boosting_variant, mixing,obj='original'):
+    def get_G_boosted_loss(self, boosting_variant, mixing, obj='original'):
         # Define lambda placeholder
         self.l = tf.placeholder(tf.float32, name='lambda')
 
@@ -184,16 +185,16 @@ class GMAN:
         if boosting_variant == 'boost_prediction':
             # Define generator loss
             if obj == 'original':
-                self.G_loss = tf.reduce_mean(tf.log(1-sigmoid(self.Df_expected)))
+                self.G_loss = tf.reduce_mean(tf.log(1 - sigmoid(self.Df_expected)))
             else:
                 self.G_loss = tf.reduce_mean(-tf.log(sigmoid(self.Df_expected)))
 
             # Define minimax objective for generator
-            self.V_G = tf.reduce_mean(tf.log(self.Dr_expected)+tf.log(1-sigmoid(self.Df_expected)))
+            self.V_G = tf.reduce_mean(tf.log(self.Dr_expected) + tf.log(1 - sigmoid(self.Df_expected)))
         else:
             # Define generator loss
             if obj == 'original':
-                self.G_losses = [tf.reduce_mean(tf.log(1-self.Df[ind]))
+                self.G_losses = [tf.reduce_mean(tf.log(1 - self.Df[ind]))
                                  for ind in range(len(self.Df))]
                 sign = -1.
             else:
@@ -201,7 +202,7 @@ class GMAN:
                                  for ind in range(len(self.Df))]
                 sign = 1.
             _G_losses = [tf.expand_dims(loss, 0) for loss in self.G_losses]
-            _G_losses = tf.concat(axis=0,values=_G_losses)
+            _G_losses = tf.concat(axis=0, values=_G_losses)
             self.G_loss = mix_prediction(_G_losses, self.l,
                                          mean_typ=mixing, weight_typ=self.weight_type,
                                          sign=sign)
@@ -218,11 +219,11 @@ class GMAN:
         self.Df = [sigmoid(logit) for logit in self.Df_logits]
         self.Dr = [sigmoid(logit) for logit in self.Dr_logits]
 
-        self.D_losses = [tf.reduce_mean(-tf.log(self.Dr[ind])-tf.log(1-self.Df[ind]))
+        self.D_losses = [tf.reduce_mean(-tf.log(self.Dr[ind]) - tf.log(1 - self.Df[ind]))
                          for ind in range(len(self.Dr))]
 
         # Define minimax objectives for discriminators
-        self.V_D = [tf.reduce_mean(tf.log(self.Dr[ind]) + tf.log(1-self.Df[ind])) for ind in range(len(self.Dr))]
+        self.V_D = [tf.reduce_mean(tf.log(self.Dr[ind]) + tf.log(1 - self.Df[ind])) for ind in range(len(self.Dr))]
 
     def get_G_loss(self, mixing, obj='original'):
         # Define lambda placeholder
@@ -239,7 +240,7 @@ class GMAN:
 
         # Define generator loss
         if obj == 'original':
-            self.G_losses = [tf.reduce_mean(tf.log(1-self.Df[ind]))
+            self.G_losses = [tf.reduce_mean(tf.log(1 - self.Df[ind]))
                              for ind in range(len(self.Df))]
             sign = -1.
         else:
@@ -278,8 +279,6 @@ class GMAN:
         tf.summary.scalar('V_G', self.V_G)
 
 
-
-
 def main(_):
     if FLAGS.path is None:
         path = FLAGS.dataset + '/%s_%d_%s_%s_%d' % (FLAGS.dataset, FLAGS.num_disc, FLAGS.mixing, FLAGS.weighting,
@@ -292,8 +291,8 @@ def main(_):
     if FLAGS.dataset == 'mnist':
         data = get_mnist_data().train
         print('Max: %f, Min: %f' % (np.max(data.images), np.min(data.images)))
-        data._images = np.pad((data._images*2) - 1., ((0, 0), (2, 2), (2, 2), (0, 0)), 'minimum')
-        print(data.images.shape)
+        data._images = np.pad((data._images * 2) - 1., ((0, 0), (2, 2), (2, 2), (0, 0)), 'minimum')
+        # print(f'data.images.shape -> {data.images.shape}')
         num_c = 1
     elif FLAGS.dataset == 'celebA':
         celeb = Celeb()
@@ -322,7 +321,7 @@ def main(_):
     c = 'Greys_r'
     indices = np.random.permutation(range(data.images.shape[0]))[:FLAGS.batch_size]
     images = data.images[indices]
-    plot_fakes(images,num_c,batch_size,c,filename=path+'/real_baseline')
+    plot_fakes(images, num_c, batch_size, c, filename=path + '/real_baseline')
 
     config = tf.ConfigProto(allow_soft_placement=True)
     config.gpu_options.allow_growth = True
@@ -332,8 +331,7 @@ def main(_):
             gman = GMAN(FLAGS.latent, FLAGS.image_size, FLAGS.batch_size, FLAGS.num_disc,
                         num_channels=num_c, num_hidden=FLAGS.num_hidden,
                         mixing=FLAGS.mixing, weight_type=FLAGS.weighting,
-                        objective=FLAGS.objective, boosting_variant=boosting_variant,
-                        self_challenged=FLAGS.self_learnt)
+                        objective=FLAGS.objective, boosting_variant=boosting_variant, self_challenged=FLAGS.self_learnt)
 
             # Initialize feed_dict
             feed_dict = {gman.real: None, gman.l: lam, gman.lrg: lr, gman.lrd: lr}
@@ -346,7 +344,7 @@ def main(_):
                 aux_vars_init = zip(gman.aux_vars, [t, alpha, v])
                 feed_dict.update(aux_vars_init)
 
-            train_writer = tf.summary.FileWriter(path+'/',sess.graph)
+            train_writer = tf.summary.FileWriter(path + '/', sess.graph)
             summary = tf.summary.merge_all()
             init = tf.global_variables_initializer()
             sess.run(init)
@@ -369,13 +367,14 @@ def main(_):
                     for k in range(iterations):
                         feed_dict[gman.real] = data.next_batch(batch_size * gman.N)[0]
 
-                        _summary, _G_loss, _V, _min_Df, _max_Df, _min_Dr, _max_Dr = sess.run([summary, gman.G_loss, gman.V_G, gman.min_Df, gman.max_Df, gman.min_Dr, gman.max_Dr],
-                                                                 feed_dict=feed_dict)
+                        _summary, _G_loss, _V, _min_Df, _max_Df, _min_Dr, _max_Dr = sess.run(
+                            [summary, gman.G_loss, gman.V_G, gman.min_Df, gman.max_Df, gman.min_Dr, gman.max_Dr],
+                            feed_dict=feed_dict)
                         train_writer.add_summary(_summary, j * iterations + k)
 
                         _D_losses = sess.run(gman.D_losses, feed_dict=feed_dict)
 
-                        aux_vars_new = sess.run([gman.all_opt]+gman.aux_vars_new, feed_dict=feed_dict)
+                        aux_vars_new = sess.run([gman.all_opt] + gman.aux_vars_new, feed_dict=feed_dict)
                         if len(aux_vars_new) > 1:
                             aux_vars_new = aux_vars_new[1:]
                             feed_dict.update(zip(gman.aux_vars, aux_vars_new))
@@ -389,8 +388,10 @@ def main(_):
                         max_Dr.append(_max_Dr)
 
                         if (k + 1) % 10 == 0:
-                            print('epoch %d, minibatch: %d, D_Loss: %0.4f, G_Loss: %0.4f, V: %0.4f, Df: [%0.4f,%0.4f], Dr: [%0.4f,%0.4f]'
-                                  % (j, k, np.mean(D_losses), np.mean(G_loss), np.mean(V), min(min_Df), max(max_Df), min(min_Dr), max(max_Dr)))
+                            print(
+                                'epoch %d, minibatch: %d, D_Loss: %0.4f, G_Loss: %0.4f, V: %0.4f, Df: [%0.4f,%0.4f], Dr: [%0.4f,%0.4f]' % (
+                                    j, k, np.mean(D_losses), np.mean(G_loss), np.mean(V), min(min_Df), max(max_Df),
+                                    min(min_Dr), max(max_Dr)))
                             G_loss = []
                             D_losses = []
                             V = []
@@ -400,7 +401,7 @@ def main(_):
                             max_Dr = []
 
                     images = sess.run(gman.fake, feed_dict=feed_dict)[:batch_size]
-                    plot_fakes(images,  num_c, batch_size, c, filename=path+'/%d.png' % j)
+                    plot_fakes(images, num_c, batch_size, c, filename=path + '/%d.png' % j)
 
                     with tf.device('/cpu:0'):
                         mpath = saver.save(sess, path + '/model.ckpt', global_step=j)
@@ -414,10 +415,10 @@ def main(_):
                     print('Model saved as %s' % mpath)
 
             images = sess.run(gman.fake, feed_dict=feed_dict)[:batch_size]
-            plot_fakes(images,num_c,batch_size,c,filename=path+'/final.png')
-            
+            plot_fakes(images, num_c, batch_size, c, filename=path + '/final.png')
 
-def plot_fakes(images,num_c,batch_size,c,filename):
+
+def plot_fakes(images, num_c, batch_size, c, filename):
     f, axarr = plt.subplots(10, 10)
     images = (np.add(images, 1.) / 2.)
     if num_c == 1:
@@ -431,7 +432,7 @@ def plot_fakes(images,num_c,batch_size,c,filename):
 
 
 if __name__ == '__main__':
-    flags = tf.app.flags
+    flags = tf.flags
     flags.DEFINE_integer("epochs", 25, "Epoch to train [25]")
     flags.DEFINE_integer("iterations", 600, "Iterations per epoch [600]")
     flags.DEFINE_integer("latent", 100, "number of latent variables. [100]")
